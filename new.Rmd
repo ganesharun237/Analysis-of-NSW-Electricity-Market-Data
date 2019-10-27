@@ -1,0 +1,180 @@
+---
+title: "Analysis of NSW Electricity Market Data"
+author: "Perry Stephenson"
+date: "7 March 2015"
+output: html_document
+---
+
+This is an analysis of a dataset that is freely available from the Australian Energy Market Operator (AEMO), and can be accessed from <a href="http://www.aemo.com.au/Electricity/Data/Price-and-Demand/Aggregated-Price-and-Demand-Data-Files">this link</a>.
+
+The dataset combines wholesale electricity prices ($/MWh) with average network demand (MW), reporting each figure for each 30 minute trading interval. The data refers exclusively to NSW. Most of the column names are intuitive; RRP refers to the Regional Reference Price.
+
+Let's start off by loading the required packages.
+
+```{r eval =FALSE,warning=FALSE}
+# Load Checkpoint package and define CRAN snapshot date for package versions
+
+library(checkpoint)   # Load Checkoint package
+checkpoint("2019-10-25", checkpointLocation = tempdir())  # Checkpoint function to define CRAN snapshot date for package versions
+```
+
+```{r}
+# Load all other necessary packages
+
+library(RCurl)
+library(utils)
+library(base)
+library(graphics)
+library(stats)
+library(car)
+```
+
+
+
+Initially, the dataset contained the following columns:
+
+```{r echo=FALSE}
+
+power_initial_geturl <- getURL("https://raw.githubusercontent.com/ganesharun237/test/master/DATA201502_NSW1_initial.csv")   # command to get/load dataset from the github raw-file url and assign to a R variable as script embedded data
+
+
+power_initial <- read.csv(text = power_initial_geturl)  # command to assign dataframe from script embedded data present in csv format
+
+
+
+head(power_initial) # command to return/display the first few rows of the dataframe
+```
+
+<p>To analyse a time-varying dataset using the techniques we have been using, it was necessary to derive some categorical data from this dataset. For simplicity, this was completed using Excel. The final dataset contains the following information:<p>
+
+```{r echo=FALSE}
+
+
+power_geturl <- getURL("https://raw.githubusercontent.com/ganesharun237/Analysis-of-NSW-Electricity-Market-Data/master/DATA201502_NSW1_modified.csv")   # command to get/load dataset from the github raw-file url and assign to a R variable as script embedded data
+
+
+power <- read.csv(text = power_geturl)  # command to assign dataframe from script embedded data present in csv format
+
+
+head(power)    # command to return/display the first few rows of the dataframe
+```
+
+<h2>Initial Summary</h2>
+An initial summary of the dataset shows the following:
+
+```{r, echo=FALSE}
+summary(power)   # command to provide summary of descriptive statistics of each column of a dataframe
+```
+
+Further, a naïve <i>plot</i> command shows some potential correlations which can be further investigated:
+
+```{r, echo=FALSE}
+plot(power)  # command to plot the correlation between various columns in the power dataframe
+```
+
+Taking a closer look at some of the more interesting plots, they seem to make sense intuitively. For example, plotting TotalDemand as a function of IntervalPeriod shows the cyclic nature of the data, as you would expect when superimposing 28 days of electrical demand data.
+
+```{r, echo=FALSE}
+attach(power)  # Command to add R object to search path
+plot(IntervalPeriod, TotalDemand)  # command to plot the correlation between IntervalPeriod and TotalDemand as a scatter plot
+```
+
+Also, the RRP seems to strongly correlate with the TotalDemand, except in a few price-spike events (it is a market after all!)
+
+```{r, echo=FALSE}
+plot(TotalDemand, RRP)  # command to plot the correlation between TotalDemand and RRP as a scatter plot
+```
+
+There is also evidence that "Weekend" will be an important differentation, as with "BusinessHours". I have compared both factors here with reference to TotalDemand, as this is likely the mechanism by which they affect RRP.
+
+```{r, echo=FALSE}
+plot(Weekend, TotalDemand, xlab="Weekend", ylab="TotalDemand")   # command to plot the relation between Weekend and TotalDemand
+plot(BusinessHours, TotalDemand, xlab="BusinessHours", ylab="TotalDemand")  # command to plot the relation between BusinessHours and TotalDemand
+```
+
+RRP presents an interesting problem, as whilst it normally correlated with TotalDemand, on several occasions it increases to up to 6 times a typical maximum value. With knowledge of the dataset, this represents market failures triggered by network constraints, generator shutdowns, or external issues. The issue is best displayed by showing what it does to a box plot.
+
+```{r, echo=FALSE}
+boxplot(RRP) # command to display/show the boxplot for RRP
+```
+
+It will be interesting to see how this affects analysis further down the track.
+
+<h2>ANOVA</h2>
+
+To see whether TotalDemand can be used to predict RRP, ANOVA is performed. Firstly, the assumptions are checked graphically, and then the summary of the results is shown.
+
+```{r}
+powermodel1 <- aov(RRP ~ TotalDemand) # command to fit an analysis of variance model between RRP and TotalDemand and assign the result to a R object
+par(mfrow=c(2,2))     # command to set graphical parameters
+plot(powermodel1)     # command to plot the relation between various elements present in the powermodel1
+summary(powermodel1)   # command to provide summary of descriptive statistics of each column of a dataframe
+```
+
+Obviously, the outliers are pretty... out there. I'll get rid of the price spikes by taking a subset where the RRP is less than 60.
+
+```{r}
+detach(power)   # command to remove R object from search path
+power.sub <- subset(power, RRP < 60)  # command to select all rows in the power dataframe which have a RRP value of less than 60
+attach(power.sub)   # command to add R object to search path
+powermodel1.sub <- aov(RRP ~ TotalDemand)   # command to fit an analysis of variance model between RRP and TotalDemand and assign the result to a R object
+par(mfrow=c(2,2))   # command to set graphical parameters
+plot(powermodel1.sub)    # command to plot the relation between various elements present in the powermodel1.sub
+summary(powermodel1.sub)   # command to provide summary of descriptive statistics of each column of a dataframe
+detach(power.sub)     # command to remove R object from search path
+```
+
+That's better! I think we can confidently declare this to be a strong correlation. I will continue modifying both the initial dataset and the "price spikes removed" dataset.
+
+<h2>Linear Model</h2>
+There are 3 variables logically should affect RRP: Weekend, BusinessHours and TotalDemand. Weekend and BusinessHours both affect TotalDemand, but could also independantly affect RRP. 
+
+```{r warning=FALSE}
+
+power$Weekend<-recode(power$Weekend,"'yes'='1';'no'='0'")   # command to replace the column values in a dataframe
+power.sub$Weekend<-recode(power.sub$Weekend,"'yes'='1';'no'='0'")   # command to replace the column values in a dataframe
+power$BusinessHours<-recode(power$BusinessHours,"'yes'='1';'no'='0'")  # command to replace the column values in a dataframe
+power.sub$BusinessHours<-recode(power.sub$BusinessHours,"'yes'='1';'no'='0'")  # command to replace the column values in a dataframe
+head(power.sub)   # command to return/display the first few rows of the dataframe
+is.factor(power.sub$Weekend)  # command to check whether column is of type factor or not and return TRUE or FALSE
+is.factor(power.sub$BusinessHours)# command to check whether column is of type factor or not and return TRUE or FALSE
+```
+
+And now, it's modelling time!
+
+```{r}
+powermodel2 <- lm(RRP ~ TotalDemand+Weekend+BusinessHours, data=power) # command to create  regression model 
+powermodel2.sub <- lm(RRP ~ TotalDemand+Weekend+BusinessHours, data=power.sub) # command to create  regression model 
+summary(powermodel2)    #command to provide summary of descriptive statistics of each column of a dataframe
+```
+This again shows a strong correlation for TotalDemand, but not much else! And the R squared value isn't exactly mind-blowing. Running it again without the price spikes:
+```{r}
+summary(powermodel2.sub)  #command to provide summary of descriptive statistics of each column of a dataframe
+```
+That's more like it! I'm actually a little surprised here - intuitively I would have thought that in modern society, there would be a greater correlation for BusinessHours than for Weekend. I guess that's why you use statistics instead of intuition!
+
+I've now got 3 good variables accounting for 65% of the variance in the price of power, as long as the price spikes are removed. Not bad!  
+
+The other thing that could be worth analysing is the relationship between IntervalPeriod (time of day) and TotalDemand, with the addition of the Weekend factor. BusinessHours isn't required as this is derived from the IntervalPeriod data. I haven't (yet) got the skills to analyse time-varying datasets, so I'll be treating IntervalPeriod as a factor. It's going to be messy, but that's what computers are for!
+
+```{r}
+powermodel3.sub <- lm(TotalDemand ~ Weekend+as.factor(IntervalPeriod), data=power.sub)  # command to create  regression model 
+summary(powermodel3.sub)  #command to provide summary of descriptive statistics of each column of a dataframe
+```
+
+That's pretty good! Nearly 85% of variance in aggregated electrical load in NSW can be described purely in terms of time of day and whether or not the day is a weekend. At the risk of making it even messier, I can use the DayOfWeek value as a factor to provide information on the day of the week.
+
+```{r}
+powermodel4.sub <- lm(TotalDemand ~ as.factor(DayOfWeek)+as.factor(IntervalPeriod), data=power.sub)   # command to create  regression model 
+summary(powermodel4.sub)  #command to provide summary of descriptive statistics of each column of a dataframe
+```
+This gives a tiny improvement, and analysis of the DayOfWeek coefficients gives a hint as to why. It seems that TotalDemand isn't particularly sensitive to <i>which</i> weekday it is, with (relatively) small differences between days, and large differences between weekdays and weekends.
+
+Of course, the result for this model is barely affected by price spikes in RRP, so running the model with the price spike records included shouldn't make much of a difference.
+
+```{r}
+powermodel4 <- lm(TotalDemand ~ as.factor(DayOfWeek)+as.factor(IntervalPeriod), data=power)  # command to create  regression model
+summary(powermodel4)  #command to provide summary of descriptive statistics of each column of a dataframe
+```
+
+Overall, I'm pretty impressed. If I had more time (and data!) I think it would be good to try and find more correlations with things like generator availability, network constraints, weather, and more.
